@@ -40,4 +40,42 @@ CHIP CPU {
 
     PARTS:
     // Put your code here:
+    
+    ARegister(in=nextAValue, load=saveToA, out=A, out[0..14]=addressM); // A寄存器
+    
+    // if (instruction[12]==0) 操作数为A else 操作数为RAM[A]
+    Mux16(a=A, b=inM, sel=instruction[12], out=OpV1);
+
+    DRegister(in=nextDValue, load=saveToD, out=D); // D寄存器
+    
+    ALU(x=D, y=OpV1, 
+        zx=instruction[11], nx=instruction[10], zy=instruction[9], 
+        ny=instruction[8], f=instruction[7], no=instruction[6],
+        out=nextDValue, out=calOut, out=outM, zr=zr, ng=ng);
+
+    // if (instruction[15]==0) { A = instruction }
+    Mux16(a=instruction, b=calOut, sel=instruction[15], out=nextAValue);
+    Not(in=instruction[15], out=loadImmediate);
+
+    Or(a=loadImmediate, b=instruction[5], out=saveToA);
+    And(a=instruction[15], b=instruction[4], out=saveToD);
+    
+    Not(in=zr, out=nzr);
+    Not(in=ng, out=ge);
+    And(a=nzr, b=ge, out=pos); // 是否大于0
+
+    // 当alu计算结果和指令匹配，且当前是C指令时，才setPC
+    And(a=ng, b=instruction[2], out=o1);
+    And(a=zr, b=instruction[1], out=o2);
+    And(a=pos, b=instruction[0], out=o3);
+    Or8Way(in[0]=o1, in[1]=o2, in[2]=o3, out=maySetPC);
+    And(a=instruction[15], b=maySetPC, out=setPC);
+
+    Not(in=reset, out=noReset);
+    Not(in=setPC, out=noSetPC);
+    Or(a=noReset, b=noSetPC, out=needInc);
+
+    PC(in=A, load=setPC, inc=needInc, reset=reset, out[0..14]=pc);
+
+    And(a=instruction[15], b=instruction[3], out=writeM);
 }
