@@ -3,15 +3,18 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 type CodeWriter struct {
-	bufWriter      *bufio.Writer
-	jmpFlagCounter int64
-	filename       string
+	bufWriter                *bufio.Writer
+	jmpFlagCounter           int64
+	callReturnAddressCounter int64
+	filename                 string
+	curFuncName              string
 }
 
 func NewCodeWriter(path string) *CodeWriter {
@@ -24,25 +27,17 @@ func NewCodeWriter(path string) *CodeWriter {
 		bufWriter: bufio.NewWriter(file),
 		filename:  filepath.Base(filename),
 	}
-	// codeWriter.init()
 	return codeWriter
 }
 
-func (w *CodeWriter) init() {
-	w.writeLine(strings.Join([]string{
-		"@256", // 初始化栈顶
-		"D=A",
-		"@SP",
-		"M=D",
-	}, "\n"))
-}
-
 func (w *CodeWriter) SetFileName(filename string) {
+	w.bufWriter.Flush()
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0666)
 	if err != nil {
 		panic(err)
 	}
 	w.bufWriter = bufio.NewWriter(file)
+	w.filename = filepath.Base(filename)
 }
 
 func (w *CodeWriter) WriteArithmetic(command string) {
@@ -79,6 +74,118 @@ func (w *CodeWriter) WritePushPop(commandType int, segment string, index int64) 
 	case C_POP:
 		w.writePop(segment, index)
 	}
+}
+
+func (w *CodeWriter) WriteInit() {
+	// SP=256
+	w.writeLine("@256")
+	w.writeLine("D=A")
+	w.writeLine("@SP")
+	w.writeLine("M=D")
+
+	w.WriteCall("Sys.init", 0)
+}
+
+func (w *CodeWriter) WriteRawFile(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+	_, err = io.Copy(w.bufWriter, file)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (w *CodeWriter) WriteLabel(label string) {
+	w.writeLine(fmt.Sprintf("(%s)", w.getCurFuncLabel(label)))
+}
+
+func (w *CodeWriter) WriteGoto(label string) {
+	w.writeJmp(w.getCurFuncLabel(label))
+}
+
+func (w *CodeWriter) WriteIf(label string) {
+	w.writeLine(popD())
+	w.writeLine("@" + w.getCurFuncLabel(label))
+	w.writeLine("D;JNE")
+}
+
+func (w *CodeWriter) WriteCall(funcName string, n int32) {
+	returnAddressLabel := w.getCurFuncName() + ".return." + w.getCallReturnAddressCount()
+	w.writeLine(pushValue(returnAddressLabel))
+	w.writeLine(pushRegSegment("LCL"))
+	w.writeLine(pushRegSegment("ARG"))
+	w.writeLine(pushRegSegment("THIS"))
+	w.writeLine(pushRegSegment("THAT"))
+
+	// ARG = SP - n - 5
+	w.writeLine("@SP")
+	w.writeLine("D=M")
+	w.writeLine(fmt.Sprintf("@%d", n))
+	w.writeLine("D=D-A")
+	w.writeLine("@5")
+	w.writeLine("D=D-A")
+	w.writeLine("@ARG")
+	w.writeLine("M=D")
+
+	// LCL = SP
+	w.writeLine("@SP")
+	w.writeLine("D=M")
+	w.writeLine("@LCL")
+	w.writeLine("M=D")
+
+	// goto funcName
+	w.writeJmp(funcName)
+
+	// return address label
+	w.writeLine(fmt.Sprintf("(%s)", returnAddressLabel))
+}
+
+func (w *CodeWriter) WriteReturn() {
+	// FRAME = LCL
+	w.writeLine("@LCL")
+	w.writeLine("D=M")
+	w.writeLine("@13")
+	w.writeLine("M=D")
+
+	// RET = *(FRAME-5)
+	w.writeLine("D=M")
+	w.writeLine("@5")
+	w.writeLine("D=D-A")
+	w.writeLine("A=D")
+	w.writeLine("D=M")
+	w.writeLine("@14")
+	w.writeLine("M=D")
+
+	// *ARG = pop()
+	w.writeLine(popToMemSegment("ARG", 0))
+
+	// SP = ARG + 1
+	w.writeLine("@ARG")
+	w.writeLine("D=M+1")
+	w.writeLine("@SP")
+	w.writeLine("M=D")
+
+	w.writeSourceSubToTarget("13", "THAT", 1)
+	w.writeSourceSubToTarget("13", "THIS", 2)
+	w.writeSourceSubToTarget("13", "ARG", 3)
+	w.writeSourceSubToTarget("13", "LCL", 4)
+
+	// goto RET
+	w.writeLine("@14")
+	w.writeLine("A=M")
+	w.writeLine("0;JMP")
+
+}
+
+func (w *CodeWriter) WriteFunction(funcName string, k int64) {
+	w.writeLine(fmt.Sprintf("(%s)", funcName))
+	for i := int64(0); i < k; i++ {
+		w.writeLine(pushValue("0"))
+	}
+	w.enterFunc(funcName)
 }
 
 func (w *CodeWriter) writeAdd() {
@@ -188,28 +295,25 @@ func (w *CodeWriter) writeLine(line string) {
 }
 
 func (w *CodeWriter) writePush(segment string, index int64) {
-	fmt.Println("writePush")
 	if segment == "constant" {
 		w.writeLine(fmt.Sprintf("@%d", index))
 		w.writeLine("D=A")
 		w.writeLine(pushD())
 	} else if segment == "argument" {
-		fmt.Printf("argument: %d\n", index)
-		fmt.Println(pushToMemSegment("ARG", index))
-		w.writeLine(pushToMemSegment("ARG", index))
+		w.writeLine(pushMemSegment("ARG", index))
 	} else if segment == "local" {
-		w.writeLine(pushToMemSegment("LCL", index))
+		w.writeLine(pushMemSegment("LCL", index))
 	} else if segment == "this" {
-		w.writeLine(pushToMemSegment("THIS", index))
+		w.writeLine(pushMemSegment("THIS", index))
 	} else if segment == "that" {
-		w.writeLine(pushToMemSegment("THAT", index))
+		w.writeLine(pushMemSegment("THAT", index))
 	} else if segment == "temp" {
-		w.writeLine(pushToRegSegment(5 + index))
+		w.writeLine(pushRegSegment(fmt.Sprintf("%d", 5+index)))
 	} else if segment == "pointer" {
 		if index == 0 {
-			w.writeLine(pushToRegSegment(3))
+			w.writeLine(pushRegSegment("3"))
 		} else if index == 1 {
-			w.writeLine(pushToRegSegment(4))
+			w.writeLine(pushRegSegment("4"))
 		}
 	} else if segment == "static" {
 		w.writeLine(strings.Join([]string{
@@ -224,7 +328,6 @@ func (w *CodeWriter) writePop(segment string, index int64) {
 	if segment == "constant" {
 		w.writeLine(popM())
 	} else if segment == "argument" {
-		fmt.Println(popToMemSegment("ARG", index))
 		w.writeLine(popToMemSegment("ARG", index))
 	} else if segment == "local" {
 		w.writeLine(popToMemSegment("LCL", index))
@@ -233,12 +336,12 @@ func (w *CodeWriter) writePop(segment string, index int64) {
 	} else if segment == "that" {
 		w.writeLine(popToMemSegment("THAT", index))
 	} else if segment == "temp" {
-		w.writeLine(popToRegSegment(5 + index))
+		w.writeLine(popToRegSegment(fmt.Sprintf("%d", 5+index)))
 	} else if segment == "pointer" {
 		if index == 0 {
-			w.writeLine(popToRegSegment(3))
+			w.writeLine(popToRegSegment("3"))
 		} else if index == 1 {
-			w.writeLine(popToRegSegment(4))
+			w.writeLine(popToRegSegment("4"))
 		}
 	} else if segment == "static" {
 		w.writeLine(strings.Join([]string{
@@ -249,14 +352,48 @@ func (w *CodeWriter) writePop(segment string, index int64) {
 	}
 }
 
+func (w *CodeWriter) writeJmp(label string) {
+	w.writeLine("@" + label)
+	w.writeLine("0;JMP")
+}
+
+func (w *CodeWriter) writeSourceSubToTarget(sourceAddress, targetAddress string, subVal int32) {
+	w.writeLine("@" + sourceAddress)
+	w.writeLine("D=M")
+	w.writeLine(fmt.Sprintf("@%d", subVal))
+	w.writeLine("D=D-A")
+	w.writeLine("A=D")
+	w.writeLine("D=M")
+	w.writeLine("@" + targetAddress)
+	w.writeLine("M=D")
+}
+
 func (w *CodeWriter) getJumpFlagCount() string {
 	v := w.jmpFlagCounter
 	w.jmpFlagCounter += 1
 	return fmt.Sprintf("%d", v)
 }
 
+func (w *CodeWriter) getCallReturnAddressCount() string {
+	v := w.callReturnAddressCounter
+	w.callReturnAddressCounter += 1
+	return fmt.Sprintf("%d", v)
+}
+
 func (w *CodeWriter) getStaticName(index int64) string {
 	return fmt.Sprintf("%s.%d", w.filename, index)
+}
+
+func (w *CodeWriter) enterFunc(funcName string) {
+	w.curFuncName = funcName
+}
+
+func (w *CodeWriter) getCurFuncName() string {
+	return w.curFuncName
+}
+
+func (w *CodeWriter) getCurFuncLabel(label string) string {
+	return w.getCurFuncName() + "." + label
 }
 
 func popToMemSegment(seg string, index int64) string {
@@ -274,15 +411,15 @@ func popToMemSegment(seg string, index int64) string {
 	}, "\n")
 }
 
-func popToRegSegment(regIndex int64) string {
+func popToRegSegment(reg string) string {
 	return strings.Join([]string{
 		popD(),
-		fmt.Sprintf("@%d", regIndex),
+		fmt.Sprintf("@%s", reg),
 		"M=D",
 	}, "\n")
 }
 
-func pushToMemSegment(seg string, index int64) string {
+func pushMemSegment(seg string, index int64) string {
 	return strings.Join([]string{
 		"@" + seg,
 		"D=M",
@@ -294,10 +431,18 @@ func pushToMemSegment(seg string, index int64) string {
 	}, "\n")
 }
 
-func pushToRegSegment(regIndex int64) string {
+func pushRegSegment(reg string) string {
 	return strings.Join([]string{
-		fmt.Sprintf("@%d", regIndex),
+		fmt.Sprintf("@%s", reg),
 		"D=M",
+		pushD(),
+	}, "\n")
+}
+
+func pushValue(val string) string {
+	return strings.Join([]string{
+		fmt.Sprintf("@%s", val),
+		"D=A",
 		pushD(),
 	}, "\n")
 }

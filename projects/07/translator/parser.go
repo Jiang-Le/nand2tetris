@@ -54,6 +54,7 @@ func (p *Parser) HasMoreCommands() bool {
 
 func (p *Parser) Advance() {
 	line := strings.TrimSpace(p.curLine)
+
 	var cmd Command
 	if len(line) == 0 {
 		cmd = Command{
@@ -69,6 +70,18 @@ func (p *Parser) Advance() {
 			cmd = parsePushCommand(tokens)
 		case "pop":
 			cmd = parsePopCommand(tokens)
+		case "call":
+			cmd = parseCallCommand(tokens)
+		case "function":
+			cmd = parseFunctionCommand(tokens)
+		case "return":
+			cmd = parseRetrunCommand(tokens)
+		case "if-goto":
+			cmd = parseIfCommand(tokens)
+		case "goto":
+			cmd = parseGotoCommand(tokens)
+		case "label":
+			cmd = parseLabelCommand(tokens)
 		}
 	}
 	p.curCommand = cmd
@@ -117,5 +130,56 @@ func parsePushCommand(tokens []string) Command {
 		commandType: C_PUSH,
 		Arg1:        tokens[1],
 		Arg2:        arg2,
+	}
+}
+
+func parseCallCommand(tokens []string) Command {
+	arg2, err := strconv.ParseInt(tokens[2], 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return Command{
+		commandType: C_CALL,
+		Arg1:        tokens[1],
+		Arg2:        arg2,
+	}
+}
+
+func parseFunctionCommand(tokens []string) Command {
+	arg2, err := strconv.ParseInt(tokens[2], 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return Command{
+		commandType: C_FUNCTION,
+		Arg1:        tokens[1],
+		Arg2:        arg2,
+	}
+}
+
+func parseRetrunCommand(tokens []string) Command {
+	return Command{
+		commandType: C_RETURN,
+	}
+}
+
+func parseIfCommand(tokens []string) Command {
+	return Command{
+		commandType: C_IF,
+		Arg1:        tokens[1],
+	}
+}
+
+func parseGotoCommand(tokens []string) Command {
+	return Command{
+		commandType: C_GOTO,
+		Arg1:        tokens[1],
+	}
+}
+
+func parseLabelCommand(tokens []string) Command {
+	return Command{
+		commandType: C_LABEL,
+		Arg1:        tokens[1],
 	}
 }
