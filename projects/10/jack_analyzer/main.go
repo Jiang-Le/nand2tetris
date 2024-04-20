@@ -12,21 +12,23 @@ func main() {
 		return
 	}
 	tokenizer := NewTokenizer(f)
+
 	for tokenizer.HasMoreTokens() {
 		tokenizer.Advance()
-		switch tokenizer.TokenType() {
+		token := tokenizer.Token()
+		switch token.TokenType() {
 		case KEYWORD:
-			fmt.Println(tokenizer.Keyword())
+			fmt.Println(token.Keyword())
 		case SYMBOL:
-			fmt.Println(tokenizer.Symnol())
+			fmt.Println(token.Symbol())
 		case IDENTIFIER:
-			fmt.Println(tokenizer.Identifier())
+			fmt.Println(token.Identifier())
 		case INT_CONST:
-			fmt.Println(tokenizer.IntVal())
+			fmt.Println(token.IntVal())
 		case STRING_CONST:
-			fmt.Println(tokenizer.StringVal())
+			fmt.Println(token.StringVal())
 		case ERR_IDENTIFIER:
-			fmt.Printf("err token: %s\n", tokenizer.StringVal())
+			fmt.Printf("err token: %s\n", token.StringVal())
 		}
 	}
 }

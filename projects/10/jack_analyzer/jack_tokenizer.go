@@ -7,11 +7,48 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/pkg/errors"
 )
 
 type Token struct {
 	val       string
 	tokenType TokenType
+	line int64
+	col int64
+}
+
+func (t *Token) String() string {
+	return fmt.Sprintf("ln: %d, col: %d, val: %s", t.line, t.col, t.val)
+}
+
+func (t *Token) TokenType() TokenType {
+	return t.tokenType
+}
+
+func (t *Token) Keyword() Keyword {
+	return Keyword(t.val)
+}
+
+func (t *Token) Symbol() string {
+	return t.val
+}
+
+func (t *Token) Identifier() string {
+	return t.val
+}
+
+func (t *Token) IntVal() int64 {
+	v, _ := strconv.ParseInt(t.val, 10, 64)
+	return v
+}
+
+func (t *Token) StringVal() string {
+	return t.val[1 : len(t.val)-1]
+}
+
+func (t *Token) Val() string {
+	return t.val
 }
 
 type TokenType string
@@ -66,6 +103,8 @@ type Tokenizer struct {
 	eof       bool
 	bufReader *bufio.Reader
 	token     Token
+	parsedLine int64
+	parsedCol int64
 }
 
 func NewTokenizer(reader io.Reader) Tokenizer {
@@ -73,8 +112,14 @@ func NewTokenizer(reader io.Reader) Tokenizer {
 	tokenizer := Tokenizer{
 		eof:       false,
 		bufReader: bufReader,
+		parsedLine: 1,
+		parsedCol: 0,
 	}
 	return tokenizer
+}
+
+func (t *Tokenizer) Token() Token {
+	return t.token
 }
 
 func (t *Tokenizer) HasMoreTokens() bool {
@@ -112,10 +157,14 @@ func (t *Tokenizer) Advance() error {
 	token := []rune{
 		r,
 	}
+	beginLine := t.parsedLine
+	beginCol := t.parsedCol
 	if isSymbol(r) {
 		t.token = Token{
 			val:       string(token),
 			tokenType: SYMBOL,
+			line: beginLine,
+			col: beginCol,
 		}
 		return nil
 	}
@@ -125,12 +174,14 @@ func (t *Tokenizer) Advance() error {
 			token = append(token, r)
 		}
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "line: %d, col: %d", t.parsedLine, t.parsedCol)
 		}
 		token = append(token, r)
 		t.token = Token{
 			val:       string(token),
 			tokenType: STRING_CONST,
+			line: beginLine,
+			col: beginCol,
 		}
 		return nil
 	}
@@ -151,6 +202,8 @@ func (t *Tokenizer) Advance() error {
 	t.token = Token{
 		val:       string(token),
 		tokenType: tokenType,
+		line: beginLine,
+		col: beginCol,
 	}
 	return nil
 }
@@ -189,35 +242,6 @@ func (t *Tokenizer) trySkipComment() (bool, error) {
 	return true, nil
 }
 
-func (t *Tokenizer) TokenType() TokenType {
-	return t.token.tokenType
-}
-
-func (t *Tokenizer) Keyword() Keyword {
-	return Keyword(t.token.val)
-}
-
-func (t *Tokenizer) Symnol() string {
-	return t.token.val
-}
-
-func (t *Tokenizer) Identifier() string {
-	return t.token.val
-}
-
-func (t *Tokenizer) IntVal() int64 {
-	v, _ := strconv.ParseInt(t.token.val, 10, 64)
-	return v
-}
-
-func (t *Tokenizer) StringVal() string {
-	return t.token.val[1 : len(t.token.val)-1]
-}
-
-func (t *Tokenizer) Val() string {
-	return t.token.val
-}
-
 func (t *Tokenizer) parseToken(rs []rune) TokenType {
 	if isKeyWord(rs) {
 		return KEYWORD
@@ -234,6 +258,11 @@ func (t *Tokenizer) parseToken(rs []rune) TokenType {
 
 func (t *Tokenizer) nextChar() (rune, error) {
 	r, _, err := t.bufReader.ReadRune()
+	if r == '\n' {
+		t.parsedLine += 1
+		t.parsedCol = 0
+	}
+	t.parsedCol += 1
 	return r, err
 }
 

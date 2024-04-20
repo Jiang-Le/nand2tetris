@@ -5,62 +5,39 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
+	"flag"
 )
 
-func TokenizerAllFile(dir, output string) error {
-	if err := os.MkdirAll(output, 0777); err != nil {
+func TestTokenizer(t *testing.T) {
+	flag.Parse()
+	argList := flag.Args()
+	if len(argList) != 2 {
+		t.Fatalf("expect 2 args, got %d args", len(argList))
+	}
+	inputFile := argList[0]
+	outputFile := argList[1]
+	if err := TokenizerFile(inputFile, outputFile); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TokenizerFile(inputFile, outputFile string) error {
+	f, err := os.Open(inputFile)
+	if err != nil {
 		return err
 	}
-	return filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error {
-		if filepath.Ext(path) != ".jack" {
-			return nil
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		_, filename := filepath.Split(path)
-		outputFileName := strings.TrimSuffix(filename, filepath.Ext(filename)) + "T.xml"
-		of, err := os.OpenFile(filepath.Join(output, outputFileName), os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0666)
-		if err != nil {
-			return err
-		}
-		defer of.Close()
-		tokenizer := NewTokenizer(f)
-		FormatTokenizer(tokenizer, of)
-		return nil
-	})
-}
-
-func TestArrayTest(t *testing.T) {
-	dir := "/Users/jiel/project/nand2tetris/projects/10/ArrayTest/"
-	output := "/Users/jiel/project/nand2tetris/projects/10/ArrayTest/output"
-	if err := TokenizerAllFile(dir, output); err != nil {
-		t.Fatal(err)
+	defer f.Close()
+	of, err := os.OpenFile(outputFile, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0666)
+	if err != nil {
+		return err
 	}
-}
-
-func TestExpressionLessSquare(t *testing.T) {
-	dir := "/Users/jiel/project/nand2tetris/projects/10/ExpressionLessSquare"
-	output := "/Users/jiel/project/nand2tetris/projects/10/ExpressionLessSquare/output"
-	if err := TokenizerAllFile(dir, output); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSquare(t *testing.T) {
-	dir := "/Users/jiel/project/nand2tetris/projects/10/Square"
-	output := "/Users/jiel/project/nand2tetris/projects/10/Square/output"
-	if err := TokenizerAllFile(dir, output); err != nil {
-		t.Fatal(err)
-	}
+	defer of.Close()
+	tokenizer := NewTokenizer(f)
+	FormatTokenizer(tokenizer, of)
+	return nil
 }
 
 func FormatTokenizer(tokenizer Tokenizer, writer io.Writer) {
@@ -72,19 +49,20 @@ func FormatTokenizer(tokenizer Tokenizer, writer io.Writer) {
 		if err != nil {
 			panic(err)
 		}
-		switch tokenizer.TokenType() {
+		token := tokenizer.Token()
+		switch token.TokenType() {
 		case KEYWORD:
-			writeLabel(buf, "keyword", string(tokenizer.Keyword()))
+			writeLabel(buf, "keyword", string(token.Keyword()))
 		case SYMBOL:
-			writeLabel(buf, "symbol", string(tokenizer.Symnol()))
+			writeLabel(buf, "symbol", string(token.Symbol()))
 		case IDENTIFIER:
-			writeLabel(buf, "identifier", string(tokenizer.Identifier()))
+			writeLabel(buf, "identifier", string(token.Identifier()))
 		case INT_CONST:
-			writeLabel(buf, "integerConstant", strconv.FormatInt(tokenizer.IntVal(), 10))
+			writeLabel(buf, "integerConstant", strconv.FormatInt(token.IntVal(), 10))
 		case STRING_CONST:
-			writeLabel(buf, "stringConstant", string(tokenizer.StringVal()))
+			writeLabel(buf, "stringConstant", string(token.StringVal()))
 		case ERR_IDENTIFIER:
-			fmt.Printf("err token: %s\n", tokenizer.StringVal())
+			fmt.Printf("err token: %s\n", token.StringVal())
 		}
 	}
 
