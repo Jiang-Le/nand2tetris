@@ -214,6 +214,10 @@ func (t *Tokenizer) StringVal() string {
 	return t.token.val[1 : len(t.token.val)-1]
 }
 
+func (t *Tokenizer) Val() string {
+	return t.token.val
+}
+
 func (t *Tokenizer) parseToken(rs []rune) TokenType {
 	if isKeyWord(rs) {
 		return KEYWORD
